@@ -1,10 +1,10 @@
-# stunning-succotash
-A roguelike written in the Hy programming language.
+# What is stunning-succotash?
+A roguelike game written in the Hy programming language.
 
 ## Dependencies
 This script uses the latest version of Hy, _not_ the version
 on PIP.  Additionally, it uses the following libraries which
-_can_ be downloaded on PIP:
+can be downloaded on PIP:
 
 * blessings
 * getch
