@@ -1,5 +1,6 @@
 (require hy.contrib.loop)
-(import [rx          [Observable]]
+(import [collections [namedtuple]]
+        [rx          [Observable]]
         [rx.subjects [Subject]]
         [blessings   [Terminal]]
         [sys         [exit stdout]]
@@ -20,6 +21,27 @@
    "  #.....#"
    "  #.....#"
    "  #######"])
+
+(def Inscription
+  (namedtuple "Inscription"
+    (, "x" "y" "sym" "contents")))
+
+(def inscriptions
+  (map (fn [props] (apply Inscription props))
+    [[1 1 "a" "You see an ant."]]))
+
+(defn index [pred it]
+  (let [res (list (filter pred it))]
+    (if (empty? res)
+      None
+      (first res))))
+
+(defn inscriptionat [x y]
+  (index
+    (fn [i]
+      (and (= x (. i x))
+           (= y (. i y))))
+    inscriptions))
 
 (defn display [str]
   (print str :end ""))
@@ -51,7 +73,7 @@
     (.map movkeys
       (fn [k]
         (if (or (= k "k") (= k "u") (= k "y")) -1
-            (or (= k "j") (= k "n") (= k "u")) 1
+            (or (= k "j") (= k "n") (= k "b")) 1
             0))))
 
   (def moves
@@ -59,13 +81,29 @@
       (.zip dxs dys (fn [x y] [x y]))
       (.start-with [4 4])))
 
+  (def moveresults
+    (->
+      (.first moves)
+      (.map (fn [m] [True m]))
+      (.concat (.skip moves 1))
+      (.scan
+        (fn [cur next]
+          (let [adj (relpos (get cur 1) next)]
+            (if (= (apply tileat adj) "#")
+              [False cur]
+              [True adj]))))))
+
   (def positions
-    (.scan moves
-      (fn [cur next]
-        (let [adj (relpos cur next)]
-          (if (= (apply tileat adj) "#")
-            cur
-            adj)))))
+    (->
+      (.filter moveresults
+        (fn [res] (= True (get res 0))))
+      (.map (fn [res] (get res 1)))))
+
+  (def bumps
+    (->
+      (.filter moveresults
+        (fn [res] (= False (get res 0))))
+      (.map (fn [res] (get res 1)))))
 
   (def prevpositions
     (->
