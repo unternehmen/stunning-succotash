@@ -1,47 +1,46 @@
 (require hy.contrib.loop)
-(import [collections [namedtuple]]
-        [rx          [Observable]]
+(import [rx          [Observable]]
         [rx.subjects [Subject]]
         [blessings   [Terminal]]
         [sys         [exit stdout]]
         [getch       [getch]]
-        [operator    [contains add]]
-        [functools   [partial]])
+        [itertools   [starmap]]
+        [operator    [contains add eq]]
+        [functools   [partial]]
+        [collections [namedtuple]])
 
 (def world
-  ["######## "
-   "#......# "
-   "#......# "
-   "#......# "
-   "#......# "
-   "###..### "
-   "  #..#   "
-   "  #..#   "
-   "  #..####"
-   "  #.....#"
-   "  #.....#"
-   "  #######"])
+  ["########           #######                                        "
+   "#......#       ####.......####                                    "
+   "#......#     ##...............#                                   "
+   "#......#   ##...##....#####....#                          ######  "
+   "#......#  #...##  ####     #.##                          #......# "
+   "###..### #..##         ####....###########################.......#"
+   "  #..#   #..#         #..........................................#"
+   "  #..#   #..#         #....###.###########################.......#"
+   "  #..#####..#         #....# #.#  #.....#                #......# "
+   "  #.........#         ###### #.####.....#                 ######  "
+   "  #.........#                #..........#                         "
+   "  ###########                ############                         "])
 
-(def Inscription
-  (namedtuple "Inscription"
-    (, "x" "y" "sym" "contents")))
+(def Thing (namedtuple "Thing" "x y sym contents"))
 
-(def inscriptions
-  (map (fn [props] (apply Inscription props))
-    [[1 1 "a" "You see an ant."]]))
+(def things
+  (->>
+    [[6 10 "0" "A wobbling egg with red spots.  Perhaps dinosaur..."]
+     [64 6 "h" "The throne of games.  Made out of recycled @ symbols."]
+     [24 8 "P" "Puff bats his eyelashes."]]
+    (starmap Thing)
+    (list)))
 
-(defn index [pred it]
-  (let [res (list (filter pred it))]
-    (if (empty? res)
+(defn thingat [x y]
+  (let [matches? (fn [t] 
+                   (and (= (. t x) x)
+                        (= (. t y) y)))
+        matched (list (filter matches? things))]
+    (if (empty? matched)
       None
-      (first res))))
-
-(defn inscriptionat [x y]
-  (index
-    (fn [i]
-      (and (= x (. i x))
-           (= y (. i y))))
-    inscriptions))
+      (first matched))))
 
 (defn display [str]
   (print str :end ""))
@@ -49,9 +48,24 @@
 (defn tileat [x y]
   (get (get world y) x))
 
-(defn relpos [origin rel]
-  [(+ (get origin 0) (get rel 0))
-   (+ (get origin 1) (get rel 1))])
+(defn translate [a b]
+  (->>
+    (zip a b)
+    (starmap add)
+    (list)))
+
+(defn lcons [a b] [a b])
+
+(defn successive [o]
+  (.zip o (.skip o 1) lcons))
+
+(defn sublimate [o val]
+  (.map o (fn [x] val)))
+
+(defmacro fn* [&rest args]
+  (let [g (gensym)]
+    `(fn [~g]
+       (apply (fn ~@args) ~g))))
 
 (defmain [&rest args]
   (def term (Terminal))
@@ -62,14 +76,14 @@
 
   (def movkeys (.filter keys (partial contains "hljknbuy")))
 
-  (def dxs
+  (def xmoves
     (.map movkeys
       (fn [k]
         (if (or (= k "h") (= k "b") (= k "y")) -1
             (or (= k "l") (= k "n") (= k "u")) 1
             0))))
 
-  (def dys
+  (def ymoves
     (.map movkeys
       (fn [k]
         (if (or (= k "k") (= k "u") (= k "y")) -1
@@ -78,59 +92,82 @@
 
   (def moves
     (->
-      (.zip dxs dys (fn [x y] [x y]))
+      (.zip xmoves ymoves (fn [x y] [x y]))
       (.start-with [4 4])))
 
-  (def moveresults
-    (->
-      (.first moves)
-      (.map (fn [m] [True m]))
-      (.concat (.skip moves 1))
-      (.scan
-        (fn [cur next]
-          (let [adj (relpos (get cur 1) next)]
-            (if (= (apply tileat adj) "#")
-              [False cur]
-              [True adj]))))))
-
   (def positions
-    (->
-      (.filter moveresults
-        (fn [res] (= True (get res 0))))
-      (.map (fn [res] (get res 1)))))
-
-  (def bumps
-    (->
-      (.filter moveresults
-        (fn [res] (= False (get res 0))))
-      (.map (fn [res] (get res 1)))))
+    (.scan moves
+      (fn [cur next]
+        (let [adj (translate cur next)]
+          (if (and (= (apply tileat adj) ".")
+                   (none? (apply thingat adj)))
+            adj
+            cur)))))
 
   (def prevpositions
     (->
-      (.start-with positions [None None])
-      (.scan
-        (fn [cur next]
-          [(get cur 1) next]))
-      (.skip 2)
+      (successive positions)
       (.map first)))
+
+  (def bumps
+    (->
+      (.skip moves 1)
+      (.zip (successive positions) lcons)
+      (.filter (fn* [_ successives] (apply eq successives)))
+      (.map
+        (fn* [move successives]
+           (->>
+             (first successives)
+             (translate move))))))
+
+  (def wallbumpmessages
+    (->
+      (.filter bumps (fn [pos] (= "#" (apply tileat pos))))
+      (sublimate "You hit a wall!")))
+
+  (def objectmessages
+    (->
+      (.filter bumps
+        (fn [pos]
+          (not (none? (apply thingat pos)))))
+      (.map
+        (fn [pos]
+          (. (apply thingat pos) contents)))))
+
+  (def messages
+    (->
+      (.merge wallbumpmessages objectmessages)
+      (.buffer :buffer-openings keys)
+      (.start-with ["Welcome to the hacker's treasure zoo..."])))
 
   (with [(.fullscreen term)]
     (display (.clear term))
 
-    (with [(.location term 0 0)]
+    (with [(.location term 0 1)]
       (for [line world] (print line)))
+
+    ; Put all touchable objects on the screen.
+    (for [thing things]
+      (with [(.location term (. thing x) (inc (. thing y)))]
+        (display (. thing sym))))
 
     (.subscribe quits exit)
 
+    (.subscribe messages
+      (fn [msgs]
+        (let [msg (.join " " msgs)]
+          (with [(.location term 0 0)] (print (* " " (. term width))))
+          (with [(.location term 0 0)] (print msg)))))
+
     (.subscribe prevpositions
       (fn [pos]
-        (with [(.location term (get pos 0) (get pos 1))]
+        (with [(.location term (get pos 0) (inc (get pos 1)))]
           (display (apply tileat pos))
           (.flush stdout))))
 
     (.subscribe positions
       (fn [pos]
-        (with [(.location term (get pos 0) (get pos 1))]
+        (with [(.location term (get pos 0) (inc (get pos 1)))]
           (display "@")
           (.flush stdout))))
 
